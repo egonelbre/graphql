@@ -42,21 +42,14 @@ func Execute(p ExecuteParams) (result *Result) {
 		if len(extErrs) != 0 {
 			result.Errors = append(result.Errors, extErrs...)
 		}
+
 		addExtensionResults(&p, result)
 	}()
 
 	resultChannel := make(chan *Result, 2)
 
-	go func(out chan<- *Result, done <-chan struct{}) {
+	go func() {
 		result := &Result{}
-
-		defer func() {
-			select {
-			case out <- result:
-			case <-done:
-			}
-		}()
-
 		exeContext, err := buildExecutionContext(buildExecutionCtxParams{
 			Schema:        p.Schema,
 			Root:          p.Root,
@@ -69,6 +62,7 @@ func Execute(p ExecuteParams) (result *Result) {
 
 		if err != nil {
 			result.Errors = append(result.Errors, gqlerrors.FormatError(err.(error)))
+			resultChannel <- result
 			return
 		}
 
@@ -77,14 +71,13 @@ func Execute(p ExecuteParams) (result *Result) {
 			Root:             p.Root,
 			Operation:        exeContext.Operation,
 		})
-		return
-	}(resultChannel, ctx.Done())
+	}()
 
 	select {
 	case <-ctx.Done():
-		result = &Result{}
-		result.Errors = append(result.Errors, gqlerrors.FormatError(ctx.Err()))
-		return result
+		return &Result{
+			Errors: gqlerrors.FormatErrors(ctx.Err()),
+		}
 	case r := <-resultChannel:
 		return r
 	}
